@@ -19,6 +19,7 @@ x-flow-worker-env: &flow-worker-env
   TEMPORAL_CLIENT_CERT:
   TEMPORAL_CLIENT_KEY:
   PEERDB_TEMPORAL_NAMESPACE: default
+  PEERDB_SNOWFLAKE_ON_ERROR: CONTINUE
   # For GCS, these will be your HMAC keys instead
   # For more information:
   # https://cloud.google.com/storage/docs/authentication/managing-hmackeys
