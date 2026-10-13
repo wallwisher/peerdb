@@ -1,16 +1,35 @@
 #!/usr/bin/env bash
 # Build and push the Flow images from a clean, committed PeerDB checkout.
-# Defaults to production; override PEERDB_GCP_PROJECT, PEERDB_GCP_REGION,
-# or PEERDB_GCP_REPOSITORY to publish elsewhere.
+# Default to development; production must be selected explicitly.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-PEERDB_GCP_PROJECT="${PEERDB_GCP_PROJECT:-logical-handler-867}"
-PEERDB_GCP_REGION="${PEERDB_GCP_REGION:-us-central1}"
-PEERDB_GCP_REPOSITORY="${PEERDB_GCP_REPOSITORY:-mozart-deploy}"
+if [[ $# -gt 1 ]]; then
+  printf 'Usage: %s [development|production]\n' "$0" >&2
+  exit 2
+fi
+
+PEERDB_ENVIRONMENT="${1:-development}"
+case "$PEERDB_ENVIRONMENT" in
+  development)
+    PEERDB_GCP_PROJECT=development-234618
+    PEERDB_GCP_REPOSITORY=padlet-dev
+    ;;
+  production)
+    PEERDB_GCP_PROJECT=logical-handler-867
+    PEERDB_GCP_REPOSITORY=mozart-deploy
+    ;;
+  *)
+    printf 'Unknown environment: %s\nUsage: %s [development|production]\n' "$PEERDB_ENVIRONMENT" "$0" >&2
+    exit 2
+    ;;
+esac
+
+PEERDB_GCP_REGION=us-central1
 PEERDB_REGISTRY_HOST="${PEERDB_GCP_REGION}-docker.pkg.dev"
 PEERDB_IMAGE_REPOSITORY="${PEERDB_REGISTRY_HOST}/${PEERDB_GCP_PROJECT}/${PEERDB_GCP_REPOSITORY}"
+printf 'Target registry: %s\n' "$PEERDB_IMAGE_REPOSITORY"
 
 for command_name in git gcloud docker; do
   if ! command -v "$command_name" >/dev/null 2>&1; then

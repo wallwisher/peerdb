@@ -21,7 +21,7 @@ We support different modes of streaming - log based (CDC), cursor based (timesta
 
 The `wallwisher/peerdb` fork uses PeerDB OSS v0.30.4 as its base release and carries a custom Flow patch for Snowflake CDC Avro errors, including `avro: *avro.null is unsupported for Avro string`. The patch gives new Snowflake raw tables 128 MiB `VARCHAR` columns for `_PEERDB_DATA` and `_PEERDB_MATCH_DATA`, writes an empty string for a serialized field that exceeds the patch's 60 MiB safety limit, and logs the destination table and record ID when raw-record Avro conversion or writing fails. It does not log the full row payload.
 
-Build and deploy the patched Flow images; the upstream `stable-v0.30.4` images in `docker-compose.yml` do not include this patch. See `scripts/build-and-push-flow-images.sh` for packaging and publishing the three Flow images.
+Build and deploy the patched Flow images; the upstream `stable-v0.30.4` images in `docker-compose.yml` do not include this patch. Run `bash scripts/build-and-push-flow-images.sh` to publish the three Flow images to the development project, or pass `production` to publish to the production project.
 
 ### Required change for existing Snowflake raw tables
 
