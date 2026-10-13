@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"math/big"
 	"regexp"
 	"strings"
@@ -25,6 +24,8 @@ import (
 )
 
 var re = regexp.MustCompile(`[^A-Za-z0-9_]`)
+
+const snowflakeMaxAvroStringBytes = 60 * 1024 * 1024
 
 // ConvertToAvroCompatibleName converts a column name to a field name that is compatible with Avro.
 func ConvertToAvroCompatibleName(columnName string) string {
@@ -214,13 +215,7 @@ func QValueToAvro(
 		types.QValueCIDR, types.QValueINET, types.QValueMacaddr,
 		types.QValueInterval, types.QValueEnum,
 		types.QValueGeography, types.QValueGeometry, types.QValuePoint:
-		if c.TargetDWH == protos.DBType_SNOWFLAKE && v.Value() != nil &&
-			(len(v.Value().(string)) > 15*1024*1024) {
-			slog.Warn("Clearing TEXT value > 15MB for Snowflake!")
-			slog.Warn("Check this issue for details: https://github.com/PeerDB-io/peerdb/issues/309")
-			return nil, nil
-		}
-		return c.processNullableUnion(v.Value())
+		return c.processNullableUnion(c.clearOversizedSnowflakeString(v.Value().(string)))
 	case types.QValueFloat32:
 		if c.TargetDWH == protos.DBType_BIGQUERY {
 			return c.processNullableUnion(float64(v.Val))
@@ -428,20 +423,17 @@ func (c *QValueAvroConverter) processBytes(byteData []byte, format internal.Bina
 	return byteData
 }
 
-func (c *QValueAvroConverter) processJSON(jsonString string) any {
-	if c.Nullable {
-		if c.TargetDWH == protos.DBType_SNOWFLAKE && len(jsonString) > 15*1024*1024 {
-			slog.Warn("Clearing JSON value > 15MB for Snowflake!")
-			slog.Warn("Check this issue for details: https://github.com/PeerDB-io/peerdb/issues/309")
-			return nil
-		}
-		return &jsonString
-	}
-
-	if c.TargetDWH == protos.DBType_SNOWFLAKE && len(jsonString) > 15*1024*1024 {
-		slog.Warn("Clearing JSON value > 15MB for Snowflake!")
-		slog.Warn("Check this issue for details: https://github.com/PeerDB-io/peerdb/issues/309")
+func (c *QValueAvroConverter) clearOversizedSnowflakeString(value string) string {
+	if c.TargetDWH == protos.DBType_SNOWFLAKE && len(value) > snowflakeMaxAvroStringBytes {
 		return ""
+	}
+	return value
+}
+
+func (c *QValueAvroConverter) processJSON(jsonString string) any {
+	jsonString = c.clearOversizedSnowflakeString(jsonString)
+	if c.Nullable {
+		return &jsonString
 	}
 	return jsonString
 }
@@ -490,19 +482,9 @@ func (c *QValueAvroConverter) processHStore(hstore string) (any, error) {
 		return "", fmt.Errorf("cannot parse %s: %w", hstore, err)
 	}
 
+	jsonString = c.clearOversizedSnowflakeString(jsonString)
 	if c.Nullable {
-		if c.TargetDWH == protos.DBType_SNOWFLAKE && len(jsonString) > 15*1024*1024 {
-			slog.Warn("Clearing HStore equivalent JSON value > 15MB for Snowflake!")
-			slog.Warn("Check this issue for details: https://github.com/PeerDB-io/peerdb/issues/309")
-			return nil, nil
-		}
 		return &jsonString, nil
-	}
-
-	if c.TargetDWH == protos.DBType_SNOWFLAKE && len(jsonString) > 15*1024*1024 {
-		slog.Warn("Clearing HStore equivalent JSON value > 15MB for Snowflake!")
-		slog.Warn("Check this issue for details: https://github.com/PeerDB-io/peerdb/issues/309")
-		return "", nil
 	}
 	return jsonString, nil
 }
