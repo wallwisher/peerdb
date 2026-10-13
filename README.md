@@ -43,6 +43,10 @@ DESC TABLE ETL_PEERDB_OSS._PEERDB_INTERNAL._PEERDB_RAW_POSTGRES_TO_SNOWFLAKE_MIR
 
 The SQL uses Snowflake database `ETL_PEERDB_OSS` and assumes the default metadata schema `_PEERDB_INTERNAL`. If the peer has a different database or metadata schema, use its actual fully qualified raw-table name. Repeat the two `ALTER TABLE` statements for each existing mirror's raw table; new raw tables receive the larger columns automatically. Snowflake documents this [column-length change](https://docs.snowflake.com/en/sql-reference/sql/alter-table-column).
 
+## Padlet query-replication status patch
+
+The Flow API returns only the newest 1,000 partition records for a query-replication mirror's status page. The existing UI fetches all returned partitions at once, and an unbounded response can exceed the gRPC gateway's 4 MiB receive limit. Older partition records remain in `peerdb_stats.qrep_partitions`; this limit affects only the status-page history, not replication.
+
 ## Get started
 
 ```bash

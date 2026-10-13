@@ -940,6 +940,45 @@ func (s Suite) TestQRep() {
 	require.NotNil(s.t, qStatus)
 	require.Len(s.t, qStatus.Partitions, 2)
 
+	// The status endpoint must still load when the catalog has more partition
+	// history than the UI can safely receive in one gRPC response.
+	catalogPool, err := internal.GetCatalogConnectionPoolFromEnv(s.t.Context())
+	require.NoError(s.t, err)
+	var runUUID string
+	err = catalogPool.QueryRow(s.t.Context(),
+		"SELECT run_uuid FROM peerdb_stats.qrep_runs WHERE flow_name=$1 ORDER BY id DESC LIMIT 1",
+		qrepConfig.FlowJobName,
+	).Scan(&runUUID)
+	require.NoError(s.t, err)
+	_, err = catalogPool.Exec(s.t.Context(), `
+		INSERT INTO peerdb_stats.qrep_partitions
+			(flow_name, run_uuid, partition_uuid, partition_start, partition_end, start_time, restart_count)
+		SELECT $1, $2, 'status-limit-' || partition_number::text, '', '', NOW(), 0
+		FROM generate_series(1, $3::integer) AS partition_number`,
+		qrepConfig.FlowJobName, runUUID, 1001)
+	require.NoError(s.t, err)
+	defer func() {
+		_, cleanupErr := catalogPool.Exec(context.Background(),
+			"DELETE FROM peerdb_stats.qrep_partitions WHERE flow_name=$1 AND partition_uuid LIKE 'status-limit-%'",
+			qrepConfig.FlowJobName)
+		require.NoError(s.t, cleanupErr)
+	}()
+
+	statusResponse, err = s.MirrorStatus(s.t.Context(), &protos.MirrorStatusRequest{
+		FlowJobName:     qrepConfig.FlowJobName,
+		IncludeFlowInfo: true,
+	})
+	require.NoError(s.t, err)
+	qStatus = statusResponse.GetQrepStatus()
+	require.NotNil(s.t, qStatus)
+	require.Len(s.t, qStatus.Partitions, 1000)
+	partitionIDs := make([]string, 0, len(qStatus.Partitions))
+	for _, partition := range qStatus.Partitions {
+		partitionIDs = append(partitionIDs, partition.PartitionId)
+	}
+	require.Contains(s.t, partitionIDs, "status-limit-1001")
+	require.NotContains(s.t, partitionIDs, "status-limit-1")
+
 	env.Cancel(s.t.Context())
 	e2e.RequireEnvCanceled(s.t, env)
 }
