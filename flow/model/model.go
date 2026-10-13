@@ -95,6 +95,8 @@ type PullRecordsRequest[T Items] struct {
 type ToJSONOptions struct {
 	UnnestColumns map[string]struct{}
 	HStoreAsJSON  bool
+	// The Snowflake Avro writer applies the larger raw-record limit after serialization.
+	PreserveLargeValues bool
 }
 
 func NewToJSONOptions(unnestCols []string, hstoreAsJSON bool) ToJSONOptions {

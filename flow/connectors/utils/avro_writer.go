@@ -3,11 +3,13 @@ package utils
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -250,12 +252,24 @@ func (p *peerDBOCFWriter) writeRecordsToOCFWriter(
 		} else {
 			avroMap, err := avroConverter.Convert(ctx, env, qrecord, typeConversions, numericTruncator)
 			if err != nil {
-				logger.Error("Failed to convert QRecord to Avro compatible map", slog.Any("error", err))
+				logger.Error("Failed to convert QRecord to Avro compatible map",
+					append([]any{slog.Any("error", err)}, rawRecordContextAttrs(avroFieldNames, qrecord)...)...)
 				return numRows.Load(), fmt.Errorf("failed to convert QRecord to Avro compatible map: %w", err)
+			}
+			if p.targetDWH == protos.DBType_SNOWFLAKE && isRawCDCRecord(avroFieldNames, qrecord) {
+				for _, index := range [...]int{3, 5} {
+					original := qRecordStringField(qrecord, index)
+					if converted, ok := avroMap[avroFieldNames[index]].(string); ok && original != "" && converted == "" {
+						logger.Warn("Cleared oversized Snowflake CDC field",
+							append([]any{slog.String("field", avroFieldNames[index]), slog.Int("size_bytes", len(original))},
+								rawRecordContextAttrs(avroFieldNames, qrecord)...)...)
+					}
+				}
 			}
 
 			if err := ocfWriter.Encode(avroMap); err != nil {
-				logger.Error("Failed to write record to OCF", slog.Any("error", err))
+				logger.Error("Failed to write record to OCF",
+					append([]any{slog.Any("error", err)}, rawRecordContextAttrs(avroFieldNames, qrecord)...)...)
 				return numRows.Load(), fmt.Errorf("failed to write record to OCF: %w", err)
 			}
 
@@ -269,4 +283,40 @@ func (p *peerDBOCFWriter) writeRecordsToOCFWriter(
 	}
 
 	return numRows.Load(), nil
+}
+
+func qRecordStringField(record []types.QValue, index int) string {
+	if index < 0 || index >= len(record) || record[index] == nil || record[index].Value() == nil {
+		return ""
+	}
+	value, ok := record[index].Value().(string)
+	if !ok {
+		return ""
+	}
+	return value
+}
+
+func isRawCDCRecord(fieldNames []string, record []types.QValue) bool {
+	return len(fieldNames) == 8 && len(record) == 8 &&
+		strings.EqualFold(fieldNames[0], "_peerdb_uid") &&
+		strings.EqualFold(fieldNames[2], "_peerdb_destination_table_name") &&
+		strings.EqualFold(fieldNames[3], "_peerdb_data")
+}
+
+// rawRecordContextAttrs adds row context only for the CDC raw table schema. Other
+// Avro writers use different record layouts. Never log the full _peerdb_data.
+func rawRecordContextAttrs(fieldNames []string, record []types.QValue) []any {
+	if !isRawCDCRecord(fieldNames, record) {
+		return nil
+	}
+
+	attrs := []any{slog.String("destination_table", qRecordStringField(record, 2))}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(qRecordStringField(record, 3)), &values); err != nil {
+		return append(attrs, slog.String("record_id", "<unavailable>"))
+	}
+	if id, ok := values["id"]; ok && len(id) <= 256 {
+		return append(attrs, slog.String("record_id", string(id)))
+	}
+	return append(attrs, slog.String("record_id", "<unavailable>"))
 }

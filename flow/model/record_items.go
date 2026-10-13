@@ -10,6 +10,8 @@ import (
 	"github.com/PeerDB-io/peerdb/flow/shared/types"
 )
 
+const legacyMaxJSONFieldSizeBytes = 15 * 1024 * 1024
+
 type Items interface {
 	json.Marshaler
 	UpdateIfNotExists(Items) []string
@@ -94,13 +96,13 @@ func (r RecordItems) toMap(opts ToJSONOptions) (map[string]any, error) {
 		case types.QValueString:
 			strVal := v.Val
 
-			if len(strVal) > 15*1024*1024 {
+			if !opts.PreserveLargeValues && len(strVal) > legacyMaxJSONFieldSizeBytes {
 				jsonStruct[col] = ""
 			} else {
 				jsonStruct[col] = strVal
 			}
 		case types.QValueJSON:
-			if len(v.Val) > 15*1024*1024 {
+			if !opts.PreserveLargeValues && len(v.Val) > legacyMaxJSONFieldSizeBytes {
 				jsonStruct[col] = "{}"
 			} else if _, ok := opts.UnnestColumns[col]; ok {
 				var unnestStruct map[string]any
@@ -125,7 +127,7 @@ func (r RecordItems) toMap(opts ToJSONOptions) (map[string]any, error) {
 					return nil, fmt.Errorf("unable to convert hstore column %s to json for value %T: %w", col, v, err)
 				}
 
-				if len(jsonVal) > 15*1024*1024 {
+				if !opts.PreserveLargeValues && len(jsonVal) > legacyMaxJSONFieldSizeBytes {
 					jsonStruct[col] = ""
 				} else {
 					jsonStruct[col] = jsonVal

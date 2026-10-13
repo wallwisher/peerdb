@@ -17,6 +17,36 @@ At PeerDB, we are building a fast, simple and the most cost effective way to str
 
 We support different modes of streaming - log based (CDC), cursor based (timestamp or integer) and XMIN based. Performance wise, we are 10x faster than existing tools. Features wise, we support native Postgres features such as comprehensive set of data-types incl. jsonb/arrays/geospatial, efficiently streaming toast columns, schema changes and so on.
 
+## Padlet Snowflake CDC patch
+
+The `wallwisher/peerdb` fork uses PeerDB OSS v0.30.4 as its base release and carries a custom Flow patch for Snowflake CDC Avro errors, including `avro: *avro.null is unsupported for Avro string`. The patch gives new Snowflake raw tables 128 MiB `VARCHAR` columns for `_PEERDB_DATA` and `_PEERDB_MATCH_DATA`, writes an empty string for a serialized field that exceeds the patch's 60 MiB safety limit, and logs the destination table and record ID when raw-record Avro conversion or writing fails. It does not log the full row payload.
+
+Build and deploy the patched Flow images; the upstream `stable-v0.30.4` images in `docker-compose.yml` do not include this patch. Run `bash scripts/build-and-push-flow-images.sh` to publish the three Flow images to the development project, or pass `production` to publish to the production project.
+
+### Required change for existing Snowflake raw tables
+
+PeerDB creates raw tables with `CREATE TABLE IF NOT EXISTS`, so deploying the patch does **not** widen columns in tables that already exist. Before resuming an existing CDC mirror on the patched images, increase both raw-table columns to match the patched table definition. For the production `postgres_to_snowflake_mirror_core_tables` mirror, run:
+
+```sql
+-- Confirm that this is the mirror's raw table before changing it.
+DESC TABLE ETL_PEERDB_OSS._PEERDB_INTERNAL._PEERDB_RAW_POSTGRES_TO_SNOWFLAKE_MIRROR_CORE_TABLES;
+
+ALTER TABLE ETL_PEERDB_OSS._PEERDB_INTERNAL._PEERDB_RAW_POSTGRES_TO_SNOWFLAKE_MIRROR_CORE_TABLES
+  ALTER COLUMN _PEERDB_DATA SET DATA TYPE VARCHAR(134217728);
+
+ALTER TABLE ETL_PEERDB_OSS._PEERDB_INTERNAL._PEERDB_RAW_POSTGRES_TO_SNOWFLAKE_MIRROR_CORE_TABLES
+  ALTER COLUMN _PEERDB_MATCH_DATA SET DATA TYPE VARCHAR(134217728);
+
+-- Verify that both columns now have the increased length.
+DESC TABLE ETL_PEERDB_OSS._PEERDB_INTERNAL._PEERDB_RAW_POSTGRES_TO_SNOWFLAKE_MIRROR_CORE_TABLES;
+```
+
+The SQL uses Snowflake database `ETL_PEERDB_OSS` and assumes the default metadata schema `_PEERDB_INTERNAL`. If the peer has a different database or metadata schema, use its actual fully qualified raw-table name. Repeat the two `ALTER TABLE` statements for each existing mirror's raw table; new raw tables receive the larger columns automatically. Snowflake documents this [column-length change](https://docs.snowflake.com/en/sql-reference/sql/alter-table-column).
+
+## Padlet query-replication status patch
+
+The Flow API returns only the newest 1,000 partition records for a query-replication mirror's status page. The existing UI fetches all returned partitions at once, and an unbounded response can exceed the gRPC gateway's 4 MiB receive limit. Older partition records remain in `peerdb_stats.qrep_partitions`; this limit affects only the status-page history, not replication.
+
 ## Get started
 
 ```bash

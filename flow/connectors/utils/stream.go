@@ -86,13 +86,17 @@ func recordToQRecordOrError[Items model.Items](
 	numericTruncator model.StreamNumericTruncator,
 ) ([]types.QValue, error) {
 	var entries [8]types.QValue
+	jsonOptions := model.NewToJSONOptions(nil, true)
+	if targetDWH == protos.DBType_SNOWFLAKE {
+		jsonOptions.PreserveLargeValues = true
+	}
 	switch typedRecord := record.(type) {
 	case *model.InsertRecord[Items]:
 		tableNumericTruncator := numericTruncator.Get(typedRecord.DestinationTableName)
 		preprocessedItems := truncateNumerics(
 			typedRecord.Items, targetDWH, unboundedNumericAsString, tableNumericTruncator,
 		)
-		itemsJSON, err := model.ItemsToJSON(preprocessedItems)
+		itemsJSON, err := preprocessedItems.ToJSONWithOptions(jsonOptions)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize insert record items to JSON: %w", err)
 		}
@@ -106,11 +110,11 @@ func recordToQRecordOrError[Items model.Items](
 		preprocessedItems := truncateNumerics(
 			typedRecord.NewItems, targetDWH, unboundedNumericAsString, tableNumericTruncator,
 		)
-		newItemsJSON, err := model.ItemsToJSON(preprocessedItems)
+		newItemsJSON, err := preprocessedItems.ToJSONWithOptions(jsonOptions)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize update record new items to JSON: %w", err)
 		}
-		oldItemsJSON, err := model.ItemsToJSON(typedRecord.OldItems)
+		oldItemsJSON, err := typedRecord.OldItems.ToJSONWithOptions(jsonOptions)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize update record old items to JSON: %w", err)
 		}
@@ -121,7 +125,7 @@ func recordToQRecordOrError[Items model.Items](
 		entries[7] = types.QValueString{Val: KeysToString(typedRecord.UnchangedToastColumns)}
 
 	case *model.DeleteRecord[Items]:
-		itemsJSON, err := model.ItemsToJSON(typedRecord.Items)
+		itemsJSON, err := typedRecord.Items.ToJSONWithOptions(jsonOptions)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize delete record items to JSON: %w", err)
 		}

@@ -366,8 +366,13 @@ func (h *FlowRequestHandler) getPartitionStatuses(
 	ctx context.Context,
 	flowJobName string,
 ) ([]*protos.PartitionStatus, error) {
-	q := "SELECT partition_uuid,start_time,end_time,rows_in_partition,rows_synced FROM peerdb_stats.qrep_partitions WHERE flow_name=$1"
-	rows, err := h.pool.Query(ctx, q, flowJobName)
+	// The UI paginates this list in memory, so bound the response before the
+	// gRPC gateway's 4 MiB receive limit is reached. Older stats stay in the catalog.
+	const maxQRepStatusPartitions = 1000
+	q := `SELECT partition_uuid,start_time,end_time,rows_in_partition,rows_synced
+		FROM peerdb_stats.qrep_partitions WHERE flow_name=$1
+		ORDER BY id DESC LIMIT $2`
+	rows, err := h.pool.Query(ctx, q, flowJobName, maxQRepStatusPartitions)
 	if err != nil {
 		slog.Error(fmt.Sprintf("unable to query qrep partition - %s: %s", flowJobName, err.Error()))
 		return nil, fmt.Errorf("unable to query qrep partition - %s: %w", flowJobName, err)
